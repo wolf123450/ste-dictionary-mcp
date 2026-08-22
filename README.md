@@ -15,8 +15,8 @@ pytest
 
 The server reads its dictionary snapshot from the `STE_DATA_DIR` environment
 variable, defaulting to `./data` (relative to the working directory the
-server is launched from). To refresh the snapshot, re-run
-`download_ste_dictionary.py` and restart the server.
+server is launched from). The snapshot in `data/` is committed to this repo,
+so no separate download step is needed.
 
 ## Running standalone
 
@@ -26,9 +26,41 @@ python -m ste_mcp.server
 
 Speaks MCP over stdio.
 
-## Claude Desktop / Claude Code configuration
+## Installing into Claude Code
 
-Add to your MCP client's config (e.g. `claude_desktop_config.json`):
+Register the server with the Claude Code CLI. Use an absolute path to your
+Python interpreter if `python` on your `PATH` doesn't have the `mcp` package
+installed.
+
+**Local scope** (available only when Claude Code is run from this repo):
+
+```bash
+cd /absolute/path/to/ste-dictionary-mcp
+claude mcp add --transport stdio --env STE_DATA_DIR=/absolute/path/to/ste-dictionary-mcp/data ste-dictionary -- python -m ste_mcp.server
+```
+
+**User scope** (available from any directory). Because user-scope servers
+don't run with this repo as their working directory, wrap the launch in a
+small script that `cd`s into the repo first, e.g. `~/.claude/ste-launcher.sh`:
+
+```bash
+#!/bin/sh
+cd /absolute/path/to/ste-dictionary-mcp
+exec python -m ste_mcp.server
+```
+
+Then register it:
+
+```bash
+chmod +x ~/.claude/ste-launcher.sh
+claude mcp add --transport stdio --scope user --env STE_DATA_DIR=/absolute/path/to/ste-dictionary-mcp/data ste-dictionary -- ~/.claude/ste-launcher.sh
+```
+
+Verify with `claude mcp list`, or `/mcp` inside a session.
+
+## Claude Desktop configuration
+
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -36,9 +68,9 @@ Add to your MCP client's config (e.g. `claude_desktop_config.json`):
     "ste-dictionary": {
       "command": "python",
       "args": ["-m", "ste_mcp.server"],
-      "cwd": "/absolute/path/to/STE-dictonary-MCP",
+      "cwd": "/absolute/path/to/ste-dictionary-mcp",
       "env": {
-        "STE_DATA_DIR": "/absolute/path/to/STE-dictonary-MCP/data"
+        "STE_DATA_DIR": "/absolute/path/to/ste-dictionary-mcp/data"
       }
     }
   }
