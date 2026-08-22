@@ -137,23 +137,23 @@ def _record(bucket: dict, word: str, line_no: int, start: int, end: int, **extra
     entry["positions"].append({"line": line_no, "start": start, "end": end})
 
 
-def _classify_and_record(word: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
+def _classify_and_record(word: str, original_word: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
     result = classify(word.lower(), dictionary)
     status = result["status"]
     if status == "ste":
         return
     if status == "non_ste":
-        _record(buckets["non_ste"], word, line_no, start, end, senses=result["senses"])
+        _record(buckets["non_ste"], original_word, line_no, start, end, senses=result["senses"])
     elif status == "technical":
-        _record(buckets["technical"], word, line_no, start, end, definition=result["technical"]["definition"])
+        _record(buckets["technical"], original_word, line_no, start, end, definition=result["technical"]["definition"])
     else:
-        _record(buckets["unknown"], word, line_no, start, end)
+        _record(buckets["unknown"], original_word, line_no, start, end)
 
 
-def _classify_token(token: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
+def _classify_token(token: str, line: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
     result = classify(token, dictionary)
     if result["status"] != "unknown" or "-" not in token:
-        _classify_and_record(token, line_no, start, end, dictionary, buckets)
+        _classify_and_record(token, line[start:end], line_no, start, end, dictionary, buckets)
         return
     # Hyphen fallback (spec §5.4): the whole token is unknown, so check each
     # hyphen-separated part on its own instead of flagging the compound.
@@ -163,7 +163,7 @@ def _classify_token(token: str, line_no: int, start: int, end: int, dictionary, 
         part_end = part_start + len(part)
         cursor = part_end + 1  # skip the hyphen
         if part and not part.isdigit():
-            _classify_and_record(part, line_no, part_start, part_end, dictionary, buckets)
+            _classify_and_record(part, line[part_start:part_end], line_no, part_start, part_end, dictionary, buckets)
 
 
 def _finalize(bucket: dict) -> tuple[list[dict], bool]:
@@ -214,7 +214,7 @@ def check_text(text: str, dictionary, include_unknown: bool = True) -> dict:
             if token.isdigit():
                 continue
             tokens_scanned += 1
-            _classify_token(token, line_no, mstart, mend, dictionary, buckets)
+            _classify_token(token, line, line_no, mstart, mend, dictionary, buckets)
 
     non_ste_items, non_ste_truncated = _finalize(buckets["non_ste"])
     technical_items, technical_truncated = _finalize(buckets["technical"])

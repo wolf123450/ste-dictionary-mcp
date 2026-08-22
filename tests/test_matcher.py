@@ -131,7 +131,21 @@ def test_check_text_flags_non_ste_word(dictionary):
 def test_check_text_flags_contraction(dictionary):
     result = check_text("Don't open the door.", dictionary)
     words = {e["word"] for e in result["non_ste"]}
-    assert "don't" in words
+    assert "Don't" in words
+
+
+def test_check_text_preserves_original_casing(dictionary):
+    # The spec (§5) requires output to show the token as it appeared in the
+    # original text, not the lowercased form used internally for matching.
+    result = check_text("ABAFT the panel is broken.", dictionary)
+    non_ste_words = {e["word"] for e in result["non_ste"]}
+    assert "ABAFT" in non_ste_words
+    assert "abaft" not in non_ste_words
+
+    result2 = check_text("Please Frobnicate the tool.", dictionary)
+    unknown_words = {e["word"] for e in result2["unknown"]}
+    assert "Frobnicate" in unknown_words
+    assert "frobnicate" not in unknown_words
 
 
 def test_check_text_phrase_matched_once_not_twice(dictionary):
@@ -153,7 +167,7 @@ def test_check_text_hyphenated_known_parts_not_flagged_unknown(dictionary):
 def test_check_text_technical_bucket(dictionary):
     result = check_text("The unit uses a 2D display.", dictionary)
     technical_words = {e["word"] for e in result["technical"]}
-    assert "2d" in technical_words
+    assert "2D" in technical_words
 
 
 def test_check_text_unknown_word(dictionary):
