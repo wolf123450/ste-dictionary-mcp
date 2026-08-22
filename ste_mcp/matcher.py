@@ -102,3 +102,138 @@ def classify(word_lower: str, dictionary) -> dict:
         "senses": [],
         "technical": None,
     }
+
+
+MAX_TEXT_CHARS = 200_000
+MAX_BUCKET_ENTRIES = 200
+_TOKEN_RE = re.compile(r"[a-z0-9]+(?:['-][a-z0-9]+)*")
+
+
+def check_word(word: str, dictionary) -> dict:
+    """Tool-facing wrapper over classify() matching spec §3.1's output shape."""
+    word_lower = word.strip().lower()
+    result = classify(word_lower, dictionary)
+    status = result["status"]
+    out_status = "not_in_dictionary" if status in ("technical", "unknown") else status
+    return {
+        "word": word,
+        "status": out_status,
+        "matched_as": result["matched_as"] or word_lower,
+        "part_of_speech": result["part_of_speech"],
+        "senses": result["senses"],
+        "technical": result["technical"],
+    }
+
+
+def _record(bucket: dict, word: str, line_no: int, start: int, end: int, **extra) -> None:
+    key = word.lower()
+    if key not in bucket:
+        if len(bucket) >= MAX_BUCKET_ENTRIES:
+            bucket["__truncated__"] = True
+            return
+        bucket[key] = {"word": word, "count": 0, "positions": [], **extra}
+    entry = bucket[key]
+    entry["count"] += 1
+    entry["positions"].append({"line": line_no, "start": start, "end": end})
+
+
+def _classify_and_record(word: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
+    result = classify(word.lower(), dictionary)
+    status = result["status"]
+    if status == "ste":
+        return
+    if status == "non_ste":
+        _record(buckets["non_ste"], word, line_no, start, end, senses=result["senses"])
+    elif status == "technical":
+        _record(buckets["technical"], word, line_no, start, end, definition=result["technical"]["definition"])
+    else:
+        _record(buckets["unknown"], word, line_no, start, end)
+
+
+def _classify_token(token: str, line_no: int, start: int, end: int, dictionary, buckets) -> None:
+    result = classify(token, dictionary)
+    if result["status"] != "unknown" or "-" not in token:
+        _classify_and_record(token, line_no, start, end, dictionary, buckets)
+        return
+    # Hyphen fallback (spec §5.4): the whole token is unknown, so check each
+    # hyphen-separated part on its own instead of flagging the compound.
+    cursor = start
+    for part in token.split("-"):
+        part_start = cursor
+        part_end = part_start + len(part)
+        cursor = part_end + 1  # skip the hyphen
+        if part and not part.isdigit():
+            _classify_and_record(part, line_no, part_start, part_end, dictionary, buckets)
+
+
+def _finalize(bucket: dict) -> tuple[list[dict], bool]:
+    truncated = bucket.pop("__truncated__", False)
+    return list(bucket.values()), truncated
+
+
+def check_text(text: str, dictionary, include_unknown: bool = True) -> dict:
+    """Scan text for non-STE, unknown, and technical words (spec §3.2, §5)."""
+    if not isinstance(text, str):
+        raise ValueError("text must be a string")
+    if not text.strip():
+        raise ValueError("text must not be empty")
+    if len(text) > MAX_TEXT_CHARS:
+        raise ValueError(f"text exceeds the {MAX_TEXT_CHARS}-character limit; split the document")
+
+    buckets = {"non_ste": {}, "unknown": {}, "technical": {}}
+    tokens_scanned = 0
+
+    for line_no, line in enumerate(text.split("\n"), start=1):
+        lowered = line.lower()
+        consumed = [False] * len(lowered)
+
+        for phrase_entry in dictionary.phrases:
+            phrase = phrase_entry["word"].lower()
+            pattern = re.compile(r"\b" + re.escape(phrase).replace(r"\ ", r"\s+") + r"\b")
+            for match in pattern.finditer(lowered):
+                mstart, mend = match.span()
+                if any(consumed[mstart:mend]):
+                    continue
+                for i in range(mstart, mend):
+                    consumed[i] = True
+                tokens_scanned += 1
+                _record(
+                    buckets["non_ste"],
+                    phrase_entry["word"],
+                    line_no,
+                    mstart,
+                    mend,
+                    senses=phrase_entry["senses"],
+                )
+
+        for match in _TOKEN_RE.finditer(lowered):
+            mstart, mend = match.span()
+            if any(consumed[mstart:mend]):
+                continue
+            token = match.group()
+            if token.isdigit():
+                continue
+            tokens_scanned += 1
+            _classify_token(token, line_no, mstart, mend, dictionary, buckets)
+
+    non_ste_items, non_ste_truncated = _finalize(buckets["non_ste"])
+    technical_items, technical_truncated = _finalize(buckets["technical"])
+    unknown_items, unknown_truncated = _finalize(buckets["unknown"])
+
+    summary = {
+        "tokens_scanned": tokens_scanned,
+        "non_ste": len(non_ste_items),
+        "unknown": len(unknown_items),
+        "technical": len(technical_items),
+    }
+    if non_ste_truncated:
+        summary["non_ste_truncated"] = True
+    if technical_truncated:
+        summary["technical_truncated"] = True
+    if unknown_truncated and include_unknown:
+        summary["unknown_truncated"] = True
+
+    result = {"summary": summary, "non_ste": non_ste_items, "technical": technical_items}
+    if include_unknown:
+        result["unknown"] = unknown_items
+    return result
