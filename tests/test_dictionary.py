@@ -124,9 +124,11 @@ def test_dictionary_info_pinned_counts(dictionary):
     # concrete assertion, not just the terms_total identity check above
     # (which holds true regardless of how much data is dropped).
     info = dictionary.info()
-    assert info["terms_total"] == 2427
+    # +2 vs. the scraped-only snapshot for the hand-authored "could"/"might"
+    # modal-verb additions (see ste_mcp/modals.py), both non-STE.
+    assert info["terms_total"] == 2429
     assert info["terms_ste"] == 1068
-    assert info["terms_non_ste"] == 1317
+    assert info["terms_non_ste"] == 1319
     assert info["sanitized_dropped"] == 42
     assert info["multi_word_phrases"] == 42
     assert info["technical_terms"] == 3042

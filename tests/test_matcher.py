@@ -312,3 +312,39 @@ def test_phrase_match_reports_original_casing_not_canonical(dictionary):
     words = {e["word"] for e in result["non_ste"]}
     assert "ACCORDING TO" in words
     assert "according to" not in words
+
+
+def test_classify_could_is_non_ste_with_can_alternative(dictionary):
+    # "could" is missing from the scraped snapshot (a data gap), so it's
+    # hand-authored in ste_mcp/modals.py -- ASD-STE100 only approves
+    # MUST/MAY/CAN/WILL as modal verbs.
+    result = classify("could", dictionary)
+    assert result["status"] == "non_ste"
+    assert result["senses"][0]["alternative"] == {"word": "CAN", "part_of_speech": "v"}
+
+
+def test_classify_might_is_non_ste_with_may_alternative(dictionary):
+    result = classify("might", dictionary)
+    assert result["status"] == "non_ste"
+    assert result["senses"][0]["alternative"] == {"word": "MAY", "part_of_speech": "v"}
+
+
+def test_check_word_could_reports_non_ste(dictionary):
+    result = check_word("could", dictionary)
+    assert result["status"] == "non_ste"
+    assert result["senses"][0]["alternative"] == {"word": "CAN", "part_of_speech": "v"}
+    assert result["senses"][0]["part_of_speech"] == "v"
+    assert result["senses"][0]["is_ste"] is False
+
+
+def test_check_word_might_reports_non_ste(dictionary):
+    result = check_word("might", dictionary)
+    assert result["status"] == "non_ste"
+    assert result["senses"][0]["alternative"] == {"word": "MAY", "part_of_speech": "v"}
+
+
+def test_check_text_flags_could_and_might(dictionary):
+    result = check_text("This could damage the part. The reading might be wrong.", dictionary)
+    words = {e["word"].lower() for e in result["non_ste"]}
+    assert "could" in words
+    assert "might" in words

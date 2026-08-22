@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from ste_mcp.contractions import CONTRACTIONS
+from ste_mcp.modals import MODAL_ENTRIES
 
 _REPLACEMENT_CHAR = "�"
 _ELLIPSIS = "..."
@@ -186,6 +187,12 @@ class Dictionary:
         for entry in entries:
             self.single.setdefault(entry["word"].lower(), []).append(entry)
 
+        # Hand-authored modal-verb additions (spec gap: "could"/"might" are
+        # absent from the scraped snapshot). Merged into `single` the same
+        # way scraped entries are, so classify() needs no special-casing.
+        for entry in MODAL_ENTRIES:
+            self.single.setdefault(entry["word"].lower(), []).append(entry)
+
         self.phrases = sorted(
             (e for e in entries if not e["is_ste"] and " " in e["word"]),
             key=lambda e: len(e["word"].split()),
@@ -197,9 +204,9 @@ class Dictionary:
 
         self.sanitized_dropped = dropped
         self.multi_word_phrases = len(self.phrases)
-        self.terms_total = len(entries) + dropped
+        self.terms_total = len(entries) + dropped + len(MODAL_ENTRIES)
         self.terms_ste = sum(1 for e in entries if e["is_ste"])
-        self.terms_non_ste = sum(1 for e in entries if not e["is_ste"])
+        self.terms_non_ste = sum(1 for e in entries if not e["is_ste"]) + len(MODAL_ENTRIES)
         self.technical_terms = len(self.technical)
         self.source = _SOURCE
         self.data_files = {
