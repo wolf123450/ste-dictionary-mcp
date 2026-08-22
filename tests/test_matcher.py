@@ -202,3 +202,16 @@ def test_check_text_approved_ste_word_produces_no_output(dictionary):
     )
     assert "open" not in all_words
     assert "stop" not in all_words
+
+
+def test_lookup_technical_term_found_shape(dictionary):
+    entry = dictionary.technical.get("2d")
+    assert entry is not None
+    payload = {"found": True, **entry}
+    assert payload["found"] is True
+    assert payload["abbreviation_definition"] == "two-dimensional"
+
+
+def test_lookup_technical_term_not_found_shape(dictionary):
+    entry = dictionary.technical.get("not-a-real-term-xyz")
+    assert entry is None
