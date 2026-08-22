@@ -215,3 +215,40 @@ def test_lookup_technical_term_found_shape(dictionary):
 def test_lookup_technical_term_not_found_shape(dictionary):
     entry = dictionary.technical.get("not-a-real-term-xyz")
     assert entry is None
+
+
+def test_check_text_technical_bucket_includes_abbreviation_definition(dictionary):
+    # Fix 3: check_text's technical bucket must also carry
+    # abbreviation_definition, since most technical entries put their
+    # content there instead of in `definition`.
+    result = check_text("The unit uses a 2D display.", dictionary)
+    entry = next(e for e in result["technical"] if e["word"] == "2D")
+    assert entry["abbreviation_definition"] == "two-dimensional"
+
+
+def test_contraction_sense_has_part_of_speech_and_is_ste(dictionary):
+    # Fix 4: every sense dict, regardless of match path, must carry
+    # part_of_speech and is_ste so a caller can filter senses by is_ste
+    # without missing contraction/phrase matches.
+    result = classify("don't", dictionary)
+    sense = result["senses"][0]
+    assert sense["part_of_speech"] == ""
+    assert sense["is_ste"] is False
+
+
+def test_phrase_match_sense_has_part_of_speech_and_is_ste(dictionary):
+    result = check_text("Refer according to the manual.", dictionary)
+    phrase_entry = next(e for e in result["non_ste"] if e["word"].lower() == "according to")
+    sense = phrase_entry["senses"][0]
+    assert "part_of_speech" in sense
+    assert sense["is_ste"] is False
+
+
+def test_phrase_match_reports_original_casing_not_canonical(dictionary):
+    # Fix 4b: the phrase pass must report the original-case substring from
+    # the input text, matching the token pass's behavior, not the
+    # dictionary's canonical (lowercase) spelling.
+    result = check_text("ACCORDING TO the manual, refer to it.", dictionary)
+    words = {e["word"] for e in result["non_ste"]}
+    assert "ACCORDING TO" in words
+    assert "according to" not in words

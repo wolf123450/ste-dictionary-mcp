@@ -58,6 +58,11 @@ def classify(word_lower: str, dictionary) -> dict:
             "non_ste_example": "",
             "alternative": {"word": expansion, "part_of_speech": ""},
             "note": None,
+            # Fix 4: contractions have no part of speech, and are always
+            # non-STE, but the field must still be present so callers that
+            # filter senses by is_ste don't silently miss them.
+            "part_of_speech": "",
+            "is_ste": False,
         }
         return {
             "status": "non_ste",
@@ -145,7 +150,15 @@ def _classify_and_record(word: str, original_word: str, line_no: int, start: int
     if status == "non_ste":
         _record(buckets["non_ste"], original_word, line_no, start, end, senses=result["senses"])
     elif status == "technical":
-        _record(buckets["technical"], original_word, line_no, start, end, definition=result["technical"]["definition"])
+        _record(
+            buckets["technical"],
+            original_word,
+            line_no,
+            start,
+            end,
+            definition=result["technical"]["definition"],
+            abbreviation_definition=result["technical"]["abbreviation_definition"],
+        )
     else:
         _record(buckets["unknown"], original_word, line_no, start, end)
 
@@ -199,7 +212,7 @@ def check_text(text: str, dictionary, include_unknown: bool = True) -> dict:
                 tokens_scanned += 1
                 _record(
                     buckets["non_ste"],
-                    phrase_entry["word"],
+                    line[mstart:mend],
                     line_no,
                     mstart,
                     mend,
