@@ -116,3 +116,72 @@ def test_info_reports_counts_and_provenance(dictionary):
     assert info["technical_terms"] == len(dictionary.technical)
     assert info["multi_word_phrases"] == len(dictionary.phrases)
     assert set(info["data_files"]) == {"ste_dictionary.json", "raw_tech_dict.json"}
+
+
+def test_dictionary_info_pinned_counts(dictionary):
+    # Fix 6: pin the actual current values (post Fix 1/Fix 2) so a future
+    # regression that silently drops data during sanitization fails a
+    # concrete assertion, not just the terms_total identity check above
+    # (which holds true regardless of how much data is dropped).
+    info = dictionary.info()
+    assert info["terms_total"] == 2427
+    assert info["terms_ste"] == 1068
+    assert info["terms_non_ste"] == 1317
+    assert info["sanitized_dropped"] == 42
+    assert info["multi_word_phrases"] == 42
+    assert info["technical_terms"] == 3042
+
+
+def test_technical_multiword_term_confirmed_in_raw_data():
+    # Confirm the term is actually present in the raw source data before
+    # asserting on the sanitized dictionary, per the task instructions.
+    raw = json.loads((DATA_DIR / "raw_tech_dict.json").read_text(encoding="utf-8"))
+    assert any(
+        rec.get("word", "").strip() == "American National Standards Institute"
+        for rec in raw
+    )
+
+
+def test_technical_multiword_term_is_kept(dictionary):
+    # Fix 1: the technical dictionary must not apply the STE dictionary's
+    # sentence-fragment/ALL-CAPS rule 3 -- legitimate multi-word technical
+    # terms like "American National Standards Institute" are not ALL-CAPS
+    # and were previously (wrongly) dropped by _is_corrupted_word.
+    entry = dictionary.technical.get("american national standards institute")
+    assert entry is not None
+    assert entry["word"] == "American National Standards Institute"
+    assert entry["abbreviation_definition"] == "ANSI"
+
+
+def test_phrases_with_valid_alternative_confirmed_in_raw_data():
+    raw = json.loads((DATA_DIR / "ste_dictionary.json").read_text(encoding="utf-8"))
+    by_word = {rec.get("word", "").strip().lower(): rec for rec in raw}
+    assert by_word["by means of"]["rows"][0]["alternative"]["word"] == "WITH"
+    assert by_word["back and forth"]["rows"][0]["alternative"]["word"] == "DIRECTION"
+
+
+def test_non_ste_phrase_with_valid_alternative_is_kept(dictionary):
+    # Fix 2: a genuine 3+-token non-STE phrase with a clean alternative and
+    # no internal sentence punctuation must survive sanitization, unlike a
+    # sentence-fragment note (e.g. the "Be accurate..." case below).
+    for word in ("by means of", "back and forth"):
+        assert word in dictionary.single
+        entry = dictionary.single[word][0]
+        assert entry["is_ste"] is False
+        assert entry["senses"][0]["alternative"] is not None
+
+    all_words = {e["word"] for entries in dictionary.single.values() for e in entries}
+    assert "by means of" in all_words
+    assert "back and forth" in all_words
+
+    phrase_words = {p["word"] for p in dictionary.phrases}
+    assert "by means of" in phrase_words
+    assert "back and forth" in phrase_words
+
+
+def test_sentence_fragment_note_still_dropped(dictionary):
+    # Existing sentence-fragment-shaped "words" (no valid alternative, and/or
+    # containing sentence punctuation) must still be dropped under the
+    # refined rule 3.
+    all_words = {e["word"] for entries in dictionary.single.values() for e in entries}
+    assert "Be accurate. If it is possible, use the name of the product." not in all_words

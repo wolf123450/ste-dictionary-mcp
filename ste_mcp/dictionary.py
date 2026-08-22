@@ -17,12 +17,24 @@ _TECH_FILE = "raw_tech_dict.json"
 _SOURCE = "ste.valaratomics.com"
 
 
-def _is_corrupted_word(word: str) -> bool:
-    """Sanitization rules from spec §4.1, rules 1-3 (and reused for rule 4
-    on alternative words)."""
+def _is_blank_or_replacement(word: str) -> bool:
+    """Baseline corruption check (spec §4.1 rules 1-2): blank word, or
+    contains the U+FFFD replacement character. Shared by every dictionary's
+    sanitization -- STE, technical, and alternative words alike."""
     if not word:
         return True
     if _REPLACEMENT_CHAR in word:
+        return True
+    return False
+
+
+def _is_corrupted_word(word: str) -> bool:
+    """Sanitization rules from spec §4.1, rules 1-3 (and reused for rule 4
+    on alternative words). This is the STE-dictionary-specific check; it
+    additionally drops ellipsis-containing and sentence-fragment-shaped
+    words, neither of which is appropriate for the technical dictionary
+    (see _is_corrupted_technical_word)."""
+    if _is_blank_or_replacement(word):
         return True
     if _ELLIPSIS in word:
         return True
@@ -34,6 +46,15 @@ def _is_corrupted_word(word: str) -> bool:
     return False
 
 
+def _is_corrupted_technical_word(word: str) -> bool:
+    """Narrower corruption check for the technical dictionary (Fix 1): only
+    drop a technical `word` if it's blank or contains U+FFFD. The STE
+    dictionary's sentence-fragment/ALL-CAPS rule (and ellipsis rule) do not
+    apply here -- legitimate multi-word technical terms like "American
+    National Standards Institute" are not ALL-CAPS and must be kept."""
+    return _is_blank_or_replacement(word)
+
+
 def _sanitize_alternative(alt: dict | None) -> tuple[dict | None, str | None]:
     if not alt:
         return None, None
@@ -43,18 +64,36 @@ def _sanitize_alternative(alt: dict | None) -> tuple[dict | None, str | None]:
     return {"word": word, "part_of_speech": alt.get("part_of_speech", "")}, None
 
 
+def _has_sentence_fragment_shape(word: str) -> bool:
+    """Rule 3's raw shape test: 3+ tokens and not ALL-CAPS. On its own this
+    over-fires on legitimate multi-word non-STE phrases (e.g. "by means of"),
+    so callers must additionally check for sentence punctuation and/or
+    row-level alternative validity before treating the word as corrupted
+    (Fix 2)."""
+    tokens = word.split()
+    return len(tokens) >= 3 and not word.isupper()
+
+
 def _load_ste_entries(path: Path) -> tuple[list[dict], int]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     entries = []
     dropped = 0
     for rec in raw:
         word = rec.get("word", "")
-        if _is_corrupted_word(word):
+        # Rules 1/2 (blank, replacement char) and the ellipsis rule always
+        # drop the entry outright, regardless of rows/alternatives.
+        if _is_blank_or_replacement(word) or _ELLIPSIS in word or _ELLIPSIS_CHAR in word:
             dropped += 1
             continue
+
+        part_of_speech = rec.get("part_of_speech", "")
+        is_ste = bool(rec.get("is_ste", False))
         senses = []
+        any_valid_alternative = False
         for row in rec.get("rows", []):
             alternative, note_word = _sanitize_alternative(row.get("alternative"))
+            if alternative is not None:
+                any_valid_alternative = True
             note = f"reword; see definition: {note_word}" if note_word else None
             senses.append(
                 {
@@ -63,8 +102,28 @@ def _load_ste_entries(path: Path) -> tuple[list[dict], int]:
                     "non_ste_example": row.get("non_ste_example", ""),
                     "alternative": alternative,
                     "note": note,
+                    # Fix 4: every sense dict carries part_of_speech/is_ste
+                    # from load time, so exact/inflection/stem matches,
+                    # phrase matches (dictionary.phrases reuses these same
+                    # entry/sense objects), and -- once tagged the same way
+                    # in matcher.py -- contraction matches all expose the
+                    # same shape.
+                    "part_of_speech": part_of_speech,
+                    "is_ste": is_ste,
                 }
             )
+
+        # Rule 3 (refined, Fix 2): a 3+-token, non-ALL-CAPS primary `word` is
+        # only corrupted (sentence-fragment-shaped note text, not a genuine
+        # phrase) if it contains sentence punctuation, OR none of its rows
+        # sanitized to a valid alternative. A clean phrase with a valid
+        # alternative (e.g. "by means of" -> WITH) is kept.
+        if _has_sentence_fragment_shape(word):
+            has_sentence_punctuation = "." in word or "," in word
+            if has_sentence_punctuation or not any_valid_alternative:
+                dropped += 1
+                continue
+
         entries.append(
             {
                 "id": rec["id"],
@@ -84,7 +143,7 @@ def _load_technical_entries(path: Path) -> dict[str, dict]:
     technical = {}
     for rec in raw:
         word = rec.get("word", "")
-        if _is_corrupted_word(word):
+        if _is_corrupted_technical_word(word):
             continue
         technical[word.lower()] = {
             "word": word,
