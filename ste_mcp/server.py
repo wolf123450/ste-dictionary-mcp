@@ -18,16 +18,22 @@ mcp = FastMCP("ste-dictionary")
 @mcp.tool()
 def check_word(word: str) -> dict[str, Any]:
     """Check whether a single word or phrase is ASD-STE100 Simple Technical
-    English (STE). Returns status (ste/non_ste/not_in_dictionary), the STE
-    alternative(s) with example sentences when non-STE, and technical-
-    dictionary info when the word is an approved technical term."""
+    English (STE). Returns status (ste/non_ste/ambiguous/not_in_dictionary),
+    the STE alternative(s) with example sentences when non-STE, and
+    technical-dictionary info when the word is an approved technical term.
+    "ambiguous" means the word has both an STE-approved sense and a non-STE
+    sense (all matched senses are still included, plus a note asking the
+    caller to verify which sense applies in context) -- "non_ste" is reserved
+    for words where every matched sense is non-STE."""
     return _check_word(word, dictionary)
 
 
 @mcp.tool()
 def check_text(text: str, include_unknown: bool = True) -> dict[str, Any]:
     """Scan a block of text for STE violations. Returns non_ste words (with
-    STE alternatives and examples), technical terms (informational), and
+    STE alternatives and examples), ambiguous words (words with both an
+    STE-approved sense and a non-STE sense, so the caller must check which
+    sense applies in context), technical terms (informational), and
     optionally unknown words not found in either dictionary. Positions are
     1-based line numbers and 0-based character offsets. Input is capped at
     200,000 characters."""

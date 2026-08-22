@@ -61,13 +61,15 @@ def test_classify_guaranteed_technical_term(dictionary):
     assert result["technical"]["abbreviation_definition"] == "two-dimensional"
 
 
-def test_classify_mixed_status_word_reports_non_ste(dictionary):
+def test_classify_mixed_status_word_reports_ambiguous(dictionary):
     # "aid" has a noun entry (is_ste=True) and a verb entry (is_ste=False,
-    # alternative "HELP"). Overall status must be non_ste since not every
-    # entry is STE-approved, and the non-STE sense must still be present
-    # (with its own part_of_speech/is_ste) in the flattened senses list.
+    # alternative "HELP"). Since some but not all entries are STE-approved,
+    # the overall status must be "ambiguous" (not the unqualified "non_ste"
+    # reserved for words where every sense is non-STE), and the non-STE
+    # sense must still be present (with its own part_of_speech/is_ste) in
+    # the flattened senses list.
     result = classify("aid", dictionary)
-    assert result["status"] == "non_ste"
+    assert result["status"] == "ambiguous"
     non_ste_senses = [s for s in result["senses"] if not s["is_ste"]]
     assert len(non_ste_senses) >= 1
     assert any(
@@ -119,6 +121,48 @@ def test_check_word_technical_term_reports_not_in_dictionary_with_technical(dict
     assert result["technical"]["abbreviation_definition"] == "two-dimensional"
 
 
+def test_check_word_mixed_senses_reports_ambiguous_with_note(dictionary):
+    # "use" has a non-STE noun entry and an STE-approved verb entry in this
+    # snapshot -- a genuine mix, not a single-entry non_ste word. check_word
+    # must report "ambiguous" (not "non_ste"), keep every sense visible, and
+    # include a note telling the caller to verify which sense applies.
+    result = check_word("use", dictionary)
+    assert result["status"] == "ambiguous"
+    assert any(s["is_ste"] for s in result["senses"])
+    assert any(not s["is_ste"] for s in result["senses"])
+    assert result["note"] == (
+        "This word has both STE-approved and non-STE senses; verify which applies in context."
+    )
+
+
+def test_check_word_mixed_senses_long_and_time(dictionary):
+    # Confirm the mix isn't specific to "use": "long" (adj is_ste=True vs.
+    # "as long as"/"no longer" non-STE) and "time" (noun is_ste=True vs.
+    # verb is_ste=False) are also genuinely mixed in this snapshot.
+    for word in ("long", "time"):
+        result = check_word(word, dictionary)
+        assert result["status"] == "ambiguous", word
+        assert any(s["is_ste"] for s in result["senses"]), word
+        assert any(not s["is_ste"] for s in result["senses"]), word
+
+
+def test_check_word_all_non_ste_senses_still_reports_non_ste(dictionary):
+    # "utilize" has only non-STE senses in this snapshot, so it must keep
+    # reporting the unambiguous "non_ste" status, not "ambiguous".
+    result = check_word("utilize", dictionary)
+    assert result["status"] == "non_ste"
+    assert all(not s["is_ste"] for s in result["senses"])
+    assert "note" not in result
+
+
+def test_check_word_fully_ste_word_unaffected(dictionary):
+    # A word with only is_ste=True senses must remain unaffected by the
+    # ambiguous-status change.
+    result = check_word("stop", dictionary)
+    assert result["status"] == "ste"
+    assert "note" not in result
+
+
 def test_check_text_flags_non_ste_word(dictionary):
     result = check_text("Install the unit abaft the panel.", dictionary)
     assert result["summary"]["non_ste"] == 1
@@ -126,6 +170,21 @@ def test_check_text_flags_non_ste_word(dictionary):
     assert entry["word"] == "abaft"
     assert entry["count"] == 1
     assert entry["positions"] == [{"line": 1, "start": 17, "end": 22}]
+
+
+def test_check_text_mixed_sense_word_lands_in_ambiguous_bucket(dictionary):
+    # "use" is a mixed-sense word (non-STE noun, STE verb) in this snapshot,
+    # so it must land in the new "ambiguous" bucket, not "non_ste", and be
+    # counted in summary["ambiguous"].
+    result = check_text("Note the use of the tool.", dictionary)
+    assert result["summary"]["ambiguous"] == 1
+    ambiguous_words = {e["word"] for e in result["ambiguous"]}
+    assert "use" in ambiguous_words
+    non_ste_words = {e["word"] for e in result["non_ste"]}
+    assert "use" not in non_ste_words
+    entry = next(e for e in result["ambiguous"] if e["word"] == "use")
+    assert any(s["is_ste"] for s in entry["senses"])
+    assert any(not s["is_ste"] for s in entry["senses"])
 
 
 def test_check_text_flags_contraction(dictionary):
@@ -197,6 +256,7 @@ def test_check_text_approved_ste_word_produces_no_output(dictionary):
     result = check_text("Open the door and stop the test.", dictionary)
     all_words = (
         {e["word"] for e in result["non_ste"]}
+        | {e["word"] for e in result["ambiguous"]}
         | {e["word"] for e in result["unknown"]}
         | {e["word"] for e in result["technical"]}
     )

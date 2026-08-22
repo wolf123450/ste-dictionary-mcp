@@ -17,19 +17,28 @@ def _stem_candidates(word: str):
 def _from_entries(entries: list[dict], matched_as: str | None, dictionary) -> dict:
     # A word can have multiple entries (one per part of speech), and they can
     # disagree on is_ste (e.g. "aid" as a noun is STE, but as a verb is not).
-    # The overall status must be "non_ste" if ANY entry is non-STE -- only
-    # report "ste" when every matched entry is STE-approved. Each flattened
-    # sense also carries its own part_of_speech/is_ste so a caller can tell
-    # exactly which sense is non-STE, since that information is lost once
-    # senses from multiple entries are merged into one list.
-    all_ste = all(entry["is_ste"] for entry in entries)
+    # Three internal statuses fall out of this: "ste" when every matched
+    # entry is STE-approved, "non_ste" when every matched entry is non-STE
+    # (an unambiguous violation), and "ambiguous" when entries disagree --
+    # some STE-approved senses, some not -- so a caller needs to check which
+    # sense applies in context rather than treating it as a flat violation.
+    # Each flattened sense also carries its own part_of_speech/is_ste so a
+    # caller can tell exactly which sense is non-STE, since that information
+    # is lost once senses from multiple entries are merged into one list.
+    ste_flags = [entry["is_ste"] for entry in entries]
+    if all(ste_flags):
+        status = "ste"
+    elif any(ste_flags):
+        status = "ambiguous"
+    else:
+        status = "non_ste"
     senses = [
         {**sense, "part_of_speech": entry["part_of_speech"], "is_ste": entry["is_ste"]}
         for entry in entries
         for sense in entry["senses"]
     ]
     return {
-        "status": "ste" if all_ste else "non_ste",
+        "status": status,
         "matched_as": matched_as,
         # Top-level part_of_speech is kept for backward compatibility with
         # the common single-POS case; it reflects only the first matched
@@ -120,7 +129,7 @@ def check_word(word: str, dictionary) -> dict:
     result = classify(word_lower, dictionary)
     status = result["status"]
     out_status = "not_in_dictionary" if status in ("technical", "unknown") else status
-    return {
+    out = {
         "word": word,
         "status": out_status,
         "matched_as": result["matched_as"] or word_lower,
@@ -128,6 +137,9 @@ def check_word(word: str, dictionary) -> dict:
         "senses": result["senses"],
         "technical": result["technical"],
     }
+    if out_status == "ambiguous":
+        out["note"] = "This word has both STE-approved and non-STE senses; verify which applies in context."
+    return out
 
 
 def _record(bucket: dict, word: str, line_no: int, start: int, end: int, **extra) -> None:
@@ -149,6 +161,8 @@ def _classify_and_record(word: str, original_word: str, line_no: int, start: int
         return
     if status == "non_ste":
         _record(buckets["non_ste"], original_word, line_no, start, end, senses=result["senses"])
+    elif status == "ambiguous":
+        _record(buckets["ambiguous"], original_word, line_no, start, end, senses=result["senses"])
     elif status == "technical":
         _record(
             buckets["technical"],
@@ -193,7 +207,7 @@ def check_text(text: str, dictionary, include_unknown: bool = True) -> dict:
     if len(text) > MAX_TEXT_CHARS:
         raise ValueError(f"text exceeds the {MAX_TEXT_CHARS}-character limit; split the document")
 
-    buckets = {"non_ste": {}, "unknown": {}, "technical": {}}
+    buckets = {"non_ste": {}, "ambiguous": {}, "unknown": {}, "technical": {}}
     tokens_scanned = 0
 
     for line_no, line in enumerate(text.split("\n"), start=1):
@@ -230,23 +244,32 @@ def check_text(text: str, dictionary, include_unknown: bool = True) -> dict:
             _classify_token(token, line, line_no, mstart, mend, dictionary, buckets)
 
     non_ste_items, non_ste_truncated = _finalize(buckets["non_ste"])
+    ambiguous_items, ambiguous_truncated = _finalize(buckets["ambiguous"])
     technical_items, technical_truncated = _finalize(buckets["technical"])
     unknown_items, unknown_truncated = _finalize(buckets["unknown"])
 
     summary = {
         "tokens_scanned": tokens_scanned,
         "non_ste": len(non_ste_items),
+        "ambiguous": len(ambiguous_items),
         "unknown": len(unknown_items),
         "technical": len(technical_items),
     }
     if non_ste_truncated:
         summary["non_ste_truncated"] = True
+    if ambiguous_truncated:
+        summary["ambiguous_truncated"] = True
     if technical_truncated:
         summary["technical_truncated"] = True
     if unknown_truncated and include_unknown:
         summary["unknown_truncated"] = True
 
-    result = {"summary": summary, "non_ste": non_ste_items, "technical": technical_items}
+    result = {
+        "summary": summary,
+        "non_ste": non_ste_items,
+        "ambiguous": ambiguous_items,
+        "technical": technical_items,
+    }
     if include_unknown:
         result["unknown"] = unknown_items
     return result

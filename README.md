@@ -82,7 +82,7 @@ Add to `claude_desktop_config.json`:
 | Tool | Purpose |
 |---|---|
 | `check_word(word)` | Is this word/phrase STE, and what replaces it? |
-| `check_text(text, include_unknown=True)` | Scan a document for non-STE, unknown, and technical words with positions. |
+| `check_text(text, include_unknown=True)` | Scan a document for non-STE, ambiguous, unknown, and technical words with positions. |
 | `lookup_technical_term(term)` | Look up an approved technical term or abbreviation. |
 | `dictionary_info()` | Dictionary source, freshness, and coverage stats. |
 
@@ -90,3 +90,11 @@ The check is word-list-based, not a grammar checker: it does not enforce
 sentence-structure rules (one idea per sentence, active voice, imperative
 mood). The agent using these tools is responsible for rewriting and for
 structural STE compliance.
+
+Some words have both an STE-approved sense and a non-STE sense (e.g. "long"
+as a plain adjective is STE, but "as long as"/"no longer" is not). For those,
+`check_word` returns `status: "ambiguous"` (instead of `"non_ste"`) along
+with a `note` telling the caller to verify which sense applies in context,
+and `check_text` reports them in a separate `ambiguous` bucket/summary count
+rather than `non_ste`. `status: "non_ste"` is reserved for words where every
+matched sense is non-STE.
