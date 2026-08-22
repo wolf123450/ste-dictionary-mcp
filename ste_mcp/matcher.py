@@ -15,11 +15,26 @@ def _stem_candidates(word: str):
 
 
 def _from_entries(entries: list[dict], matched_as: str | None, dictionary) -> dict:
-    is_ste = entries[0]["is_ste"]
-    senses = [sense for entry in entries for sense in entry["senses"]]
+    # A word can have multiple entries (one per part of speech), and they can
+    # disagree on is_ste (e.g. "aid" as a noun is STE, but as a verb is not).
+    # The overall status must be "non_ste" if ANY entry is non-STE -- only
+    # report "ste" when every matched entry is STE-approved. Each flattened
+    # sense also carries its own part_of_speech/is_ste so a caller can tell
+    # exactly which sense is non-STE, since that information is lost once
+    # senses from multiple entries are merged into one list.
+    all_ste = all(entry["is_ste"] for entry in entries)
+    senses = [
+        {**sense, "part_of_speech": entry["part_of_speech"], "is_ste": entry["is_ste"]}
+        for entry in entries
+        for sense in entry["senses"]
+    ]
     return {
-        "status": "ste" if is_ste else "non_ste",
+        "status": "ste" if all_ste else "non_ste",
         "matched_as": matched_as,
+        # Top-level part_of_speech is kept for backward compatibility with
+        # the common single-POS case; it reflects only the first matched
+        # entry. When entries disagree on POS or is_ste, the per-sense
+        # "part_of_speech"/"is_ste" fields above are the authoritative source.
         "part_of_speech": entries[0]["part_of_speech"],
         "senses": senses,
         "technical": dictionary.technical.get(entries[0]["word"].lower()),

@@ -61,6 +61,23 @@ def test_classify_guaranteed_technical_term(dictionary):
     assert result["technical"]["abbreviation_definition"] == "two-dimensional"
 
 
+def test_classify_mixed_status_word_reports_non_ste(dictionary):
+    # "aid" has a noun entry (is_ste=True) and a verb entry (is_ste=False,
+    # alternative "HELP"). Overall status must be non_ste since not every
+    # entry is STE-approved, and the non-STE sense must still be present
+    # (with its own part_of_speech/is_ste) in the flattened senses list.
+    result = classify("aid", dictionary)
+    assert result["status"] == "non_ste"
+    non_ste_senses = [s for s in result["senses"] if not s["is_ste"]]
+    assert len(non_ste_senses) >= 1
+    assert any(
+        s["alternative"] is not None and s["alternative"]["word"] == "HELP"
+        for s in non_ste_senses
+    )
+    assert any(s["part_of_speech"] == "v" for s in non_ste_senses)
+    assert any(s["part_of_speech"] == "n" and s["is_ste"] for s in result["senses"])
+
+
 def test_classify_unknown_word(dictionary):
     # "utilize" is itself a dictionary entry in this snapshot (non-STE, with
     # an alternative), so it doesn't exercise the unknown path. "frobnicate"
