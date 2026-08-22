@@ -22,13 +22,19 @@ def server_module(monkeypatch_module=None):
 
 
 @pytest.mark.anyio
-async def test_list_tools_exposes_four_tools(server_module):
+async def test_list_tools_exposes_five_tools(server_module):
     from mcp.shared.memory import create_connected_server_and_client_session as client_session
 
     async with client_session(server_module.mcp._mcp_server) as client:
         tools = await client.list_tools()
         names = {tool.name for tool in tools.tools}
-        assert names == {"check_word", "check_text", "lookup_technical_term", "dictionary_info"}
+        assert names == {
+            "check_word",
+            "check_text",
+            "check_structure",
+            "lookup_technical_term",
+            "dictionary_info",
+        }
 
 
 @pytest.mark.anyio
@@ -56,6 +62,19 @@ async def test_check_text_via_client(server_module):
         # it is classified as non_ste rather than unknown (see test_matcher.py).
         assert any(e["word"] == "utilize" for e in payload["non_ste"])
         assert any(e["word"] == "Please" for e in payload["unknown"])
+
+
+@pytest.mark.anyio
+async def test_check_structure_via_client(server_module):
+    from mcp.shared.memory import create_connected_server_and_client_session as client_session
+
+    async with client_session(server_module.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "check_structure", {"text": "The valve was removed by the technician."}
+        )
+        payload = result.structuredContent
+        assert payload["summary"]["passive_voice"] == 1
+        assert "removed" in [w.lower() for w in payload["passive_voice"][0]["trigger_words"]]
 
 
 @pytest.mark.anyio
