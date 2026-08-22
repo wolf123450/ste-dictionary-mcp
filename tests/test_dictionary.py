@@ -40,10 +40,29 @@ def test_blank_word_entry_is_dropped(dictionary):
 
 def test_corrupted_entries_are_dropped(dictionary):
     all_words = {e["word"] for entries in dictionary.single.values() for e in entries}
-    assert "IF  NOT" not in all_words
-    assert "LET . STAY" not in all_words
     assert "AS ... AS" not in all_words
     assert "Be accurate. If it is possible, use the name of the product." not in all_words
+    # Real ellipsis-corrupted word entries present in the live snapshot
+    # (U+2026 "…", not literal ASCII "..."); confirmed by direct inspection
+    # of data/ste_dictionary.json.
+    assert "IF … NOT" not in all_words
+    assert "LET …. STAY" not in all_words
+    assert "MAKE…SOFT" not in all_words
+    assert "TIGHTEN … WITH YOUR HAND" not in all_words
+
+
+def test_ellipsis_corrupted_alternative_is_dropped_with_note(dictionary):
+    # Several rows in the live snapshot (e.g. id 3442's alternative
+    # "IF … NOT", U+2026 ellipsis) must be sanitized to alternative=None
+    # with a note, never passed through with the ellipsis character intact.
+    found_sanitized = False
+    for entries_list in dictionary.single.values():
+        for entry in entries_list:
+            for sense in entry["senses"]:
+                if sense["alternative"] is not None:
+                    assert "…" not in sense["alternative"]["word"]
+                    found_sanitized = True
+    assert found_sanitized
 
 
 def test_all_caps_multiword_phrase_is_kept(dictionary):

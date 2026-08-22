@@ -11,6 +11,7 @@ from ste_mcp.contractions import CONTRACTIONS
 
 _REPLACEMENT_CHAR = "�"
 _ELLIPSIS = "..."
+_ELLIPSIS_CHAR = "…"
 _STE_FILE = "ste_dictionary.json"
 _TECH_FILE = "raw_tech_dict.json"
 _SOURCE = "ste.valaratomics.com"
@@ -24,6 +25,8 @@ def _is_corrupted_word(word: str) -> bool:
     if _REPLACEMENT_CHAR in word:
         return True
     if _ELLIPSIS in word:
+        return True
+    if _ELLIPSIS_CHAR in word:
         return True
     tokens = word.split()
     if len(tokens) >= 3 and not word.isupper():
